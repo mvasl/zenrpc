@@ -2,7 +2,7 @@ package zenrpc
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -16,7 +16,7 @@ type Printer interface {
 
 // ServeHTTP process JSON-RPC 2.0 requests via HTTP.
 // http://www.simple-is-better.org/json-rpc/transport_http.html
-func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// check for CORS GET & POST requests
 	if s.options.AllowCORS {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -54,14 +54,14 @@ func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ok, method is POST and content-type is application/json, process body
-	b, err := ioutil.ReadAll(r.Body)
+	b, err := io.ReadAll(r.Body)
 	var data interface{}
 
 	if err != nil {
 		s.printf("read request body failed with err=%v", err)
 		data = NewResponseError(nil, ParseError, "", nil)
 	} else {
-		data = s.process(newRequestContext(r.Context(), r), b)
+		data = s.process(newRequestResponseContext(r.Context(), r, w), b)
 	}
 
 	// if responses is empty -> all requests are notifications -> exit immediately
@@ -86,7 +86,7 @@ func (s Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ServeWS processes JSON-RPC 2.0 requests via Gorilla WebSocket.
 // https://github.com/gorilla/websocket/blob/master/examples/echo/
-func (s Server) ServeWS(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 	c, err := s.options.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.printf("upgrade connection failed with err=%v", err)
@@ -107,7 +107,7 @@ func (s Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		data, err := s.Do(newRequestContext(r.Context(), r), message)
+		data, err := s.Do(newRequestResponseContext(r.Context(), r, w), message)
 		if err != nil {
 			s.printf("marshal json response failed with err=%v", err)
 			c.WriteControl(websocket.CloseInternalServerErr, nil, time.Time{})

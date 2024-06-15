@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/gorilla/websocket"
+
 	"github.com/semrush/zenrpc/v2/smd"
 )
 
@@ -25,6 +26,9 @@ const (
 
 	// context key for http.Request object.
 	requestKey contextKey = "request"
+
+	// context key for http.ResponseWriter implementation.
+	responseWriterKey contextKey = "responseWriter"
 
 	// context key for namespace.
 	namespaceKey contextKey = "namespace"
@@ -165,7 +169,7 @@ func (s *Server) process(ctx context.Context, message json.RawMessage) interface
 }
 
 // processBatch process batch requests with context.
-func (s Server) processBatch(ctx context.Context, requests []Request) []Response {
+func (s *Server) processBatch(ctx context.Context, requests []Request) []Response {
 	reqLen := len(requests)
 
 	// running requests in batch asynchronously
@@ -206,7 +210,7 @@ func (s Server) processBatch(ctx context.Context, requests []Request) []Response
 }
 
 // processRequest processes a single request in service invoker.
-func (s Server) processRequest(ctx context.Context, req Request) Response {
+func (s *Server) processRequest(ctx context.Context, req Request) Response {
 	// checks for json-rpc version and method
 	if req.Version != Version || req.Method == "" {
 		return NewResponseError(req.ID, InvalidRequest, "", nil)
@@ -248,18 +252,18 @@ func (s Server) processRequest(ctx context.Context, req Request) Response {
 }
 
 // Do process JSON-RPC 2.0 request, invokes correct method for namespace and returns JSON-RPC 2.0 Response or marshaller error.
-func (s Server) Do(ctx context.Context, req []byte) ([]byte, error) {
+func (s *Server) Do(ctx context.Context, req []byte) ([]byte, error) {
 	return json.Marshal(s.process(ctx, req))
 }
 
-func (s Server) printf(format string, v ...interface{}) {
+func (s *Server) printf(format string, v ...interface{}) {
 	if s.logger != nil {
 		s.logger.Printf(format, v...)
 	}
 }
 
 // SMD returns Service Mapping Description object with all registered methods.
-func (s Server) SMD() smd.Schema {
+func (s *Server) SMD() smd.Schema {
 	sch := smd.Schema{
 		Transport:   "POST",
 		Envelope:    "JSON-RPC-2.0",
@@ -346,15 +350,21 @@ func ConvertToObject(keys []string, params json.RawMessage) (json.RawMessage, er
 	return buf.Bytes(), nil
 }
 
-// newRequestContext creates new context with http.Request.
-func newRequestContext(ctx context.Context, req *http.Request) context.Context {
-	return context.WithValue(ctx, requestKey, req)
+// newRequestResponseContext creates new context with http.Request and http.ResponseWriter.
+func newRequestResponseContext(ctx context.Context, req *http.Request, resp http.ResponseWriter) context.Context {
+	return context.WithValue(context.WithValue(ctx, responseWriterKey, resp), requestKey, req)
 }
 
 // RequestFromContext returns http.Request from context.
 func RequestFromContext(ctx context.Context) (*http.Request, bool) {
 	r, ok := ctx.Value(requestKey).(*http.Request)
 	return r, ok
+}
+
+// ResponseHeadersFromContext returns headers map to be sent with HTTP response of passed context.
+func ResponseHeadersFromContext(ctx context.Context) (http.Header, bool) {
+	r, ok := ctx.Value(responseWriterKey).(http.ResponseWriter)
+	return r.Header(), ok
 }
 
 // newNamespaceContext creates new context with current method namespace.
